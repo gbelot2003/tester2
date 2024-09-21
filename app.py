@@ -1,123 +1,29 @@
-from openai import OpenAI
-from dotenv import load_dotenv
-import numpy as np
-import fitz  # PyMuPDF
-import os
-import chromadb
+from pdf_processing import extract_text_from_pdf, split_text_into_chunks
+from embedding_processing import get_embedding_for_chunk
+from chromadb_operations import store_chunks_in_chromadb, search_in_chromadb
+from chat_operations import chat_with_gpt
 
-# Inicializa la API de OpenAI
-load_dotenv(override=True)
-
-client = OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY")
-)
-
-# Inicializar ChromaDB con SQLite
-chroma_client = chromadb.PersistentClient(path="chromadb")
-
-def extract_text_from_pdf(pdf_path):
-    """Extrae el texto de un archivo PDF."""
-    text = ""
-    with fitz.open(pdf_path) as doc:
-        for page in doc:
-            text += page.get_text()
-    return text
-
-def split_text_into_chunks(text, max_tokens=100):
-    """Divide el texto en fragmentos más pequeños para evitar los límites de la API."""
-    words = text.split()
-    chunks = []
-    current_chunk = []
-    
-    for word in words:
-        current_chunk.append(word)
-        if len(current_chunk) >= max_tokens:
-            chunks.append(" ".join(current_chunk))
-            current_chunk = []
-    
-    # Añadir el último fragmento si queda algo
-    if current_chunk:
-        chunks.append(" ".join(current_chunk))
-    
-    return chunks
-
-def get_embedding_for_chunk(chunk):
-    """Obtiene el embedding de un fragmento de texto."""
-    response = client.embeddings.create(
-        input=chunk,
-        model="text-embedding-ada-002"
-    )
-    embedding = response.data[0].embedding
-    return embedding
-
-def store_pdf_to_chromadb(pdf_path, collection_name="pdf_collection"):
-    """Vectoriza y almacena fragmentos de un PDF en ChromaDB."""
-    text = extract_text_from_pdf(pdf_path)  # Extraemos el texto del PDF
-    chunks = split_text_into_chunks(text)   # Dividimos el texto en fragmentos
-    
-    # Crea o conecta a una colección en ChromaDB
-    collection = chroma_client.get_or_create_collection(collection_name)
-    
-    for i, chunk in enumerate(chunks):
-        embedding = get_embedding_for_chunk(chunk)  # Generamos el embedding para cada fragmento
+def process_multiple_pdfs(pdf_paths):
+    """Procesa y almacena varios archivos PDF."""
+    for pdf_path in pdf_paths:
+        # Extraemos y fragmentamos cada PDF
+        text = extract_text_from_pdf(pdf_path)
+        chunks = split_text_into_chunks(text)
         
-        # Añade cada fragmento y su embedding a la colección como un documento independiente
-        collection.add(
-            documents=[chunk],
-            embeddings=[embedding],
-            ids=[f"{os.path.basename(pdf_path)}_chunk_{i}"]  # Usamos el nombre del archivo + número de fragmento
-        )
-        print(f"Fragmento {i+1} del PDF {pdf_path} almacenado en ChromaDB.")
-    
-    print(f"PDF {pdf_path} completamente almacenado en ChromaDB.")
+        # Obtenemos embeddings para cada fragmento y los almacenamos en ChromaDB
+        chunks_with_embeddings = [(chunk, get_embedding_for_chunk(chunk)) for chunk in chunks]
+        store_chunks_in_chromadb(chunks_with_embeddings, pdf_path)
 
-def search_in_chromadb(query, collection_name="pdf_collection"):
-    """Busca en ChromaDB utilizando el embedding de una consulta."""
-    # Crea o conecta a la colección
-    collection = chroma_client.get_collection(collection_name)
-
-    # Obtén el embedding de la consulta
-    query_embedding = get_embedding_for_chunk(query)
-
-    # Realiza la búsqueda en ChromaDB
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=3  # número de resultados a devolver
-    )
-
-    # Devuelve los documentos más cercanos al embedding de la consulta
-    if results['documents']:
-        return results['documents']  # Retorna los documentos relevantes
-    else:
-        return "No se encontró información relevante."
-
-def chat_with_gpt(prompt, context=None):
-    """Envía un prompt a ChatGPT junto con contexto vectorizado."""
-    messages = []
-    
-    # Si el contexto es None o no es una cadena, se establece como una cadena vacía
-    if not isinstance(context, str):
-        context = ""
-
-    if context:
-        messages.append({"role": "system", "content": context})
-    
-    messages.append({"role": "user", "content": prompt})
-    
-    response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=messages,
-        max_tokens=150,
-        temperature=0.1
-    )
-    return response.choices[0].message.content
+        print(f"PDF {pdf_path} completamente almacenado en ChromaDB.")
 
 def main():
-    # Ruta del archivo PDF
-    pdf_path = "files/encomiendas.pdf"
+    # Lista de rutas de archivos PDF
+    pdf_paths = [
+        "files/encomiendas.pdf",
+    ]
     
-    # Almacenamos el contenido vectorizado del PDF en ChromaDB (fragmentado)
-    store_pdf_to_chromadb(pdf_path)
+    # Procesamos todos los PDFs
+    process_multiple_pdfs(pdf_paths)
     
     print("Conversación con ChatGPT (escribe 'salir' para terminar):")
     
@@ -126,13 +32,23 @@ def main():
         if user_input.lower() == "salir":
             break
 
-        # Recuperamos información relevante de la base de datos usando el input del usuario
-        context = search_in_chromadb(user_input)
+        # Vectorizamos la consulta del usuario
+        query_embedding = get_embedding_for_chunk(user_input)
 
-        # Si hay resultados relevantes, aseguramos que cada uno sea una cadena antes de concatenarlos
+        # Buscamos en ChromaDB
+        context = search_in_chromadb(query_embedding)
+
+        # Unimos los resultados relevantes
         if isinstance(context, list):
-            context = " ".join([doc if isinstance(doc, str) else " ".join(doc) for doc in context])
-
+            flattened_context = []
+            for doc in context:
+                if isinstance(doc, list):
+                    flattened_context.extend(doc)  # Si es una lista, la añadimos aplanada
+                else:
+                    flattened_context.append(doc)  # Si es un string, lo añadimos directamente
+            
+            context = " ".join(flattened_context)  # Concatenamos el contexto
+        
         # Realizamos el chat con el contexto
         response = chat_with_gpt(user_input, context)
         print(f"ChatGPT: {response}")
