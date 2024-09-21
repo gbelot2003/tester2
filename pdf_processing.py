@@ -8,7 +8,7 @@ def extract_text_from_pdf(pdf_path):
             text += page.get_text()
     return text
 
-def split_text_into_chunks(text, max_tokens=100):
+def split_text_into_chunks(text, max_tokens=400):
     """Divide el texto en fragmentos más pequeños para evitar los límites de la API."""
     words = text.split()
     chunks = []
