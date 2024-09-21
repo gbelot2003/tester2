@@ -25,17 +25,28 @@ def chat_with_gpt(prompt, context=None):
     )
     return response.choices[0].message.content
 
+def process_multiple_pdfs(pdf_paths):
+    """Procesa y almacena varios archivos PDF."""
+    for pdf_path in pdf_paths:
+        # Extraemos y fragmentamos cada PDF
+        text = extract_text_from_pdf(pdf_path)
+        chunks = split_text_into_chunks(text)
+        
+        # Obtenemos embeddings para cada fragmento y los almacenamos en ChromaDB
+        chunks_with_embeddings = [(chunk, get_embedding_for_chunk(chunk)) for chunk in chunks]
+        store_chunks_in_chromadb(chunks_with_embeddings, pdf_path)
+
+        print(f"PDF {pdf_path} completamente almacenado en ChromaDB.")
+
 def main():
     # Ruta del archivo PDF
-    pdf_path = "files/encomiendas.pdf"
+    # Lista de rutas de archivos PDF
+    pdf_paths = [
+        "files/encomiendas.pdf",
+    ]
     
-    # Extraemos y fragmentamos el PDF
-    text = extract_text_from_pdf(pdf_path)
-    chunks = split_text_into_chunks(text)
-    
-    # Obtenemos embeddings para cada fragmento y lo almacenamos en ChromaDB
-    chunks_with_embeddings = [(chunk, get_embedding_for_chunk(chunk)) for chunk in chunks]
-    store_chunks_in_chromadb(chunks_with_embeddings, pdf_path)
+    # Procesamos todos los PDFs
+    process_multiple_pdfs(pdf_paths)
     
     print("Conversación con ChatGPT (escribe 'salir' para terminar):")
     
