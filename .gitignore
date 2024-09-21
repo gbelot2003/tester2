@@ -2,3 +2,4 @@
 venv
 chromadb
 files/*
+__pycache__
