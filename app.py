@@ -1,29 +1,7 @@
 from pdf_processing import extract_text_from_pdf, split_text_into_chunks
 from embedding_processing import get_embedding_for_chunk
 from chromadb_operations import store_chunks_in_chromadb, search_in_chromadb
-from openai import OpenAI
-from dotenv import load_dotenv
-import os
-
-# Inicializa la API de OpenAI
-load_dotenv(override=True)
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-def chat_with_gpt(prompt, context=None):
-    """Envía un prompt a ChatGPT junto con contexto vectorizado."""
-    messages = []
-    if context:
-        messages.append({"role": "system", "content": context})
-    
-    messages.append({"role": "user", "content": prompt})
-    
-    response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=messages,
-        max_tokens=150,
-        temperature=0.1
-    )
-    return response.choices[0].message.content
+from chat_operations import chat_with_gpt
 
 def process_multiple_pdfs(pdf_paths):
     """Procesa y almacena varios archivos PDF."""
@@ -39,7 +17,6 @@ def process_multiple_pdfs(pdf_paths):
         print(f"PDF {pdf_path} completamente almacenado en ChromaDB.")
 
 def main():
-    # Ruta del archivo PDF
     # Lista de rutas de archivos PDF
     pdf_paths = [
         "files/encomiendas.pdf",
